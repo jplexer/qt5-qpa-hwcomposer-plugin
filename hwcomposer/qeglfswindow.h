@@ -48,6 +48,8 @@
 #include "hwcomposer_context.h"
 
 #include <qpa/qplatformwindow.h>
+#include <QtCore/QHash>
+#include <QtCore/QMutex>
 
 QT_BEGIN_NAMESPACE
 
@@ -61,7 +63,9 @@ public:
     void setWindowState(Qt::WindowState state);
     WId winId() const;
 
-    EGLSurface surface() const { return m_surface; }
+    // The surface of the display currently rendered to; with display
+    // switching, surfaces for other displays are created on first use.
+    EGLSurface surface() const;
     QSurfaceFormat format() const;
 
     void create();
@@ -80,6 +84,15 @@ private:
     HwComposerContext *m_hwc;
     EGLConfig m_config;
     QSurfaceFormat m_format;
+
+    // Display switching: surfaces of displays other than the initial one
+    struct DisplaySurface {
+        EGLNativeWindowType window;
+        EGLSurface surface;
+    };
+    mutable QHash<quint64, DisplaySurface> m_displaySurfaces;
+    mutable QMutex m_displaySurfacesLock;
+    quint64 m_initialDisplay;
 };
 QT_END_NAMESPACE
 #endif // QEGLFSWINDOW_H

@@ -67,11 +67,13 @@ QEglFSScreen::QEglFSScreen(HwComposerContext *hwc, EGLDisplay dpy)
 #ifdef QEGL_EXTRA_DEBUG
     qWarning("QEglScreen %p\n", this);
 #endif
+    m_hwc->setScreen(this);
     setPowerState(PowerStateOn);
 }
 
 QEglFSScreen::~QEglFSScreen()
 {
+    m_hwc->setScreen(NULL);
 #ifdef WITH_SENSORS
     if (m_orientationSensor) {
         m_orientationSensor->stop();

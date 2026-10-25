@@ -90,6 +90,7 @@ private:
     GLuint m_rotDepthStencil;
     GLuint m_rotProgram;
     GLuint m_rotVbo;
+    QSize m_rotSize;
     typedef void (*RawBindFramebuffer)(GLenum target, GLuint framebuffer);
     RawBindFramebuffer m_rawBindFramebuffer;
     bool m_rotFailed;

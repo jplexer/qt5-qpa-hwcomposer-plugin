@@ -52,6 +52,8 @@
 
 #include <QObject>
 #include <QBasicTimer>
+#include <QHash>
+#include <QMutex>
 
 class HwcProcs_v20;
 class QWindow;
@@ -71,6 +73,11 @@ public:
 
     virtual bool requestUpdate(QEglFSWindow *window) Q_DECL_OVERRIDE;
 
+    virtual bool getScreenSizesFor(uint64_t display, int *width, int *height,
+                                   float *physical_width, float *physical_height) Q_DECL_OVERRIDE;
+    virtual EGLNativeWindowType createWindowFor(uint64_t display, int width, int height) Q_DECL_OVERRIDE;
+    virtual bool switchDisplay(uint64_t display) Q_DECL_OVERRIDE;
+
     void timerEvent(QTimerEvent *) Q_DECL_OVERRIDE;
     void handleVSyncEvent();
     bool event(QEvent *e) Q_DECL_OVERRIDE;
@@ -81,9 +88,17 @@ public:
     static int composerSequenceId;
 
 private:
+    hwc2_compat_display_t *displayFor(uint64_t display);
+
     hwc2_compat_device_t* hwc2_device;
+    // The display we currently render to (sleep, vsync and refresh rate
+    // follow it). With display switching this changes at runtime.
     hwc2_compat_display_t* hwc2_primary_display;
     hwc2_compat_layer_t* hwc2_primary_layer;
+    uint64_t m_activeDisplayId;
+    QHash<uint64_t, hwc2_compat_display_t *> m_displays;
+    QHash<uint64_t, hwc2_compat_layer_t *> m_layers;
+    QMutex m_displayLock;
 
     bool m_displayOff;
     QBasicTimer m_deliverUpdateTimeout;

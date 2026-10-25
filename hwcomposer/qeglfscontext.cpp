@@ -99,8 +99,10 @@ QEglFSContext::~QEglFSContext()
 
 bool QEglFSContext::rotating(QPlatformSurface *surface) const
 {
-    return !m_rotFailed && m_hwc->displayRotation() != 0 && surface
-            && surface->surface()->surfaceClass() == QSurface::Window;
+    // With display switching, always render through the FBO so the window
+    // surface (and its size) can change underneath Qt.
+    return !m_rotFailed && (m_hwc->displayRotation() != 0 || m_hwc->displaySwitching())
+            && surface && surface->surface()->surfaceClass() == QSurface::Window;
 }
 
 GLuint QEglFSContext::defaultFramebufferObject(QPlatformSurface *surface) const
@@ -129,8 +131,23 @@ static GLuint compileShader(QOpenGLFunctions *f, GLenum type, const char *src)
 
 bool QEglFSContext::ensureRotationTarget()
 {
-    if (m_rotFbo)
+    if (m_rotFbo) {
+        // The logical screen size changes when switching displays.
+        const QSize size = m_hwc->logicalScreenSize();
+        if (size != m_rotSize) {
+            QOpenGLFunctions *f = QOpenGLContext::currentContext()->functions();
+            f->glBindTexture(GL_TEXTURE_2D, m_rotTexture);
+            f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size.width(), size.height(), 0,
+                            GL_RGBA, GL_UNSIGNED_BYTE, 0);
+            f->glBindTexture(GL_TEXTURE_2D, 0);
+            f->glBindRenderbuffer(GL_RENDERBUFFER, m_rotDepthStencil);
+            f->glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8_OES, size.width(), size.height());
+            f->glBindRenderbuffer(GL_RENDERBUFFER, 0);
+            qDebug("QPA_HWC_ROTATION: render target resized to %dx%d", size.width(), size.height());
+            m_rotSize = size;
+        }
         return true;
+    }
 
     // QOpenGLFunctions::glBindFramebuffer(0) is redirected by Qt to
     // defaultFramebufferObject(), i.e. back to our own FBO. Reaching the real
@@ -209,6 +226,7 @@ bool QEglFSContext::ensureRotationTarget()
         m_rotFailed = true;
         return false;
     }
+    m_rotSize = size;
     qDebug("QPA_HWC_ROTATION: rendering %dx%d, rotating by %d onto %dx%d",
            size.width(), size.height(), m_hwc->displayRotation(),
            m_hwc->screenSize().width(), m_hwc->screenSize().height());
@@ -259,17 +277,19 @@ void QEglFSContext::blitRotated()
     // Quad corners on the panel: bottom-left, bottom-right, top-left, top-right.
     static const GLfloat pos[] = { -1, -1,  1, -1,  -1, 1,  1, 1 };
     // Logical texture coordinates shown at those corners for a clockwise rotation.
+    static const GLfloat tc0[]   = { 0, 0,  1, 0,  0, 1,  1, 1 };
     static const GLfloat tc90[]  = { 1, 0,  1, 1,  0, 0,  0, 1 };
     static const GLfloat tc180[] = { 1, 1,  0, 1,  1, 0,  0, 0 };
     static const GLfloat tc270[] = { 0, 1,  0, 0,  1, 1,  1, 0 };
-    const GLfloat *tc = m_hwc->displayRotation() == 90 ? tc90
-                      : m_hwc->displayRotation() == 180 ? tc180 : tc270;
+    const int rotation = m_hwc->displayRotation();
+    const GLfloat *tc = rotation == 90 ? tc90 : rotation == 180 ? tc180
+                      : rotation == 270 ? tc270 : tc0;
 
     if (!m_rotVbo) {
         f->glGenBuffers(1, &m_rotVbo);
-        GLfloat data[3][16];
-        const GLfloat *tcs[3] = { tc90, tc180, tc270 };
-        for (int r = 0; r < 3; ++r)
+        GLfloat data[4][16];
+        const GLfloat *tcs[4] = { tc90, tc180, tc270, tc0 };
+        for (int r = 0; r < 4; ++r)
             for (int i = 0; i < 4; ++i) {
                 data[r][i * 4 + 0] = pos[i * 2];
                 data[r][i * 4 + 1] = pos[i * 2 + 1];
@@ -279,7 +299,7 @@ void QEglFSContext::blitRotated()
         f->glBindBuffer(GL_ARRAY_BUFFER, m_rotVbo);
         f->glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
     }
-    const int set = tc == tc90 ? 0 : tc == tc180 ? 1 : 2;
+    const int set = tc == tc90 ? 0 : tc == tc180 ? 1 : tc == tc270 ? 2 : 3;
     const GLsizei stride = 4 * sizeof(GLfloat);
     const char *base = reinterpret_cast<const char *>(set * 16 * sizeof(GLfloat));
 
@@ -320,6 +340,11 @@ void QEglFSContext::blitRotated()
 
 bool QEglFSContext::makeCurrent(QPlatformSurface *surface)
 {
+    // Switch displays only between frames, before the window surface is
+    // looked up for this frame.
+    if (surface && surface->surface()->surfaceClass() == QSurface::Window)
+        m_hwc->applyPendingDisplaySwitch();
+
     bool current = QEGLPlatformContext::makeCurrent(surface);
     if (current && rotating(surface) && ensureRotationTarget())
         QOpenGLContext::currentContext()->functions()->glBindFramebuffer(GL_FRAMEBUFFER, m_rotFbo);

@@ -260,6 +260,7 @@ HwComposerBackend_v20::HwComposerBackend_v20(hw_module_t *hwc_module, void *libm
     , hwc2_device(NULL)
     , hwc2_primary_display(NULL)
     , hwc2_primary_layer(NULL)
+    , m_activeDisplayId(0)
     , m_displayOff(true)
 {
     procs = new HwcProcs_v20();
@@ -299,6 +300,8 @@ HwComposerBackend_v20::HwComposerBackend_v20(hw_module_t *hwc_module, void *libm
         usleep(1000);
     }
     HWC_PLUGIN_ASSERT_NOT_NULL(hwc2_primary_display);
+    m_activeDisplayId = procs->primaryDisplayId;
+    m_displays.insert(m_activeDisplayId, hwc2_primary_display);
 
     sleepDisplay(false);
 }
@@ -313,9 +316,11 @@ HwComposerBackend_v20::~HwComposerBackend_v20()
     if (!qgetenv("QPA_HWC_WORKAROUNDS").split(',').contains("no-close-hwc"))
         free(hwc2_device);
 
-    if (hwc2_primary_display != NULL) {
-        free(hwc2_primary_display);
-    }
+    // hwc2_primary_display is one of m_displays
+    foreach (hwc2_compat_display_t *d, m_displays)
+        free(d);
+    m_displays.clear();
+    hwc2_primary_display = NULL;
 
     delete procs;
 }
@@ -333,8 +338,37 @@ HwComposerBackend_v20::createWindow(int width, int height)
     // would leak stuff, and we want to avoid that for obvious reasons.
     HWC_PLUGIN_EXPECT_NULL(hwc2_primary_layer);
 
-    hwc2_compat_layer_t* layer = hwc2_primary_layer =
-        hwc2_compat_display_create_layer(hwc2_primary_display);
+    EGLNativeWindowType win = createWindowFor(m_activeDisplayId, width, height);
+    hwc2_primary_layer = m_layers.value(m_activeDisplayId);
+    return win;
+}
+
+hwc2_compat_display_t *HwComposerBackend_v20::displayFor(uint64_t display)
+{
+    hwc2_compat_display_t *d = m_displays.value(display);
+    if (!d) {
+        d = hwc2_compat_device_get_display_by_id(hwc2_device, display);
+        if (d)
+            m_displays.insert(display, d);
+        else
+            qWarning("QPA-HWC: display %" PRIu64 " is not available", display);
+    }
+    return d;
+}
+
+EGLNativeWindowType
+HwComposerBackend_v20::createWindowFor(uint64_t display, int width, int height)
+{
+    hwc2_compat_display_t *hwcDisplay = displayFor(display);
+    if (!hwcDisplay)
+        return 0;
+    if (m_layers.contains(display)) {
+        qWarning("QPA-HWC: display %" PRIu64 " already has a window", display);
+        return 0;
+    }
+
+    hwc2_compat_layer_t* layer = hwc2_compat_display_create_layer(hwcDisplay);
+    m_layers.insert(display, layer);
 
     hwc2_compat_layer_set_composition_type(layer, HWC2_COMPOSITION_CLIENT);
     hwc2_compat_layer_set_blend_mode(layer, HWC2_BLEND_MODE_NONE);
@@ -344,7 +378,7 @@ HwComposerBackend_v20::createWindow(int width, int height)
 
     HWC2Window *hwc_win = new HWC2Window(width, height,
                                          HAL_PIXEL_FORMAT_RGBA_8888,
-                                         hwc2_primary_display, layer);
+                                         hwcDisplay, layer);
 
     return (EGLNativeWindowType) static_cast<ANativeWindow *>(hwc_win);
 }
@@ -377,6 +411,7 @@ HwComposerBackend_v20::swap(EGLNativeDisplayType display, EGLSurface surface)
 void
 HwComposerBackend_v20::sleepDisplay(bool sleep)
 {
+    QMutexLocker lock(&m_displayLock);
     m_displayOff = sleep;
     if (sleep) {
         // Stop the timer so we don't end up calling into eventControl after the
@@ -411,7 +446,17 @@ HwComposerBackend_v20::refreshRate()
 bool
 HwComposerBackend_v20::getScreenSizes(int *width, int *height, float *physical_width, float *physical_height)
 {
-    HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwc2_primary_display);
+    return getScreenSizesFor(m_activeDisplayId, width, height, physical_width, physical_height);
+}
+
+bool
+HwComposerBackend_v20::getScreenSizesFor(uint64_t display, int *width, int *height,
+                                         float *physical_width, float *physical_height)
+{
+    hwc2_compat_display_t *hwcDisplay = displayFor(display);
+    if (!hwcDisplay)
+        return false;
+    HWC2DisplayConfig *config = hwc2_compat_display_get_active_config(hwcDisplay);
 
     // should not happen
     if (!config) return false;
@@ -433,10 +478,37 @@ HwComposerBackend_v20::getScreenSizes(int *width, int *height, float *physical_w
     return true;
 }
 
+bool HwComposerBackend_v20::switchDisplay(uint64_t display)
+{
+    QMutexLocker lock(&m_displayLock);
+    hwc2_compat_display_t *target = displayFor(display);
+    if (!target)
+        return false;
+    if (target == hwc2_primary_display)
+        return true;
+
+    hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_DISABLE);
+    hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_OFF);
+
+    hwc2_primary_display = target;
+    hwc2_primary_layer = m_layers.value(display);
+    m_activeDisplayId = display;
+
+    if (!m_displayOff) {
+        hwc2_compat_display_set_power_mode(hwc2_primary_display, HWC2_POWER_MODE_ON);
+        if (m_vsyncTimeout.isActive() || !m_pendingUpdate.isEmpty())
+            hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_ENABLE);
+    }
+    return true;
+}
+
 void HwComposerBackend_v20::timerEvent(QTimerEvent *e)
 {
     if (e->timerId() == m_vsyncTimeout.timerId()) {
-        hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_DISABLE);
+        {
+            QMutexLocker lock(&m_displayLock);
+            hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_DISABLE);
+        }
         m_vsyncTimeout.stop();
         // When waking up, we might get here as a result of requesting vsync events
         // before the hwc is up and running. If we're timing out while still waiting
@@ -488,6 +560,7 @@ bool HwComposerBackend_v20::requestUpdate(QEglFSWindow *window)
     if (m_vsyncTimeout.isActive()) {
         m_vsyncTimeout.stop();
     } else {
+        QMutexLocker lock(&m_displayLock);
         hwc2_compat_display_set_vsync_enabled(hwc2_primary_display, HWC2_VSYNC_ENABLE);
     }
     m_vsyncTimeout.start(50, this);

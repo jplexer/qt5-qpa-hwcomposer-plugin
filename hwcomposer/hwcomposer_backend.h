@@ -116,6 +116,15 @@ public:
 
     virtual bool requestUpdate(QEglFSWindow *) { return false; }
 
+    // Runtime display switching (QPA_HWC_DISPLAY_SWITCH), only implemented
+    // by backends that can drive more than one built-in display.
+    virtual bool getScreenSizesFor(uint64_t /*display*/, int * /*width*/, int * /*height*/,
+                                   float * /*physical_width*/, float * /*physical_height*/) { return false; }
+    virtual EGLNativeWindowType createWindowFor(uint64_t /*display*/, int /*width*/, int /*height*/) { return 0; }
+    // Powers the current display off and the given one on (unless the
+    // display is asleep); it then becomes the target of sleep/vsync calls.
+    virtual bool switchDisplay(uint64_t /*display*/) { return false; }
+
 protected:
     HwComposerBackend(hw_module_t *hwc_module, void *libmsf);
     virtual ~HwComposerBackend();

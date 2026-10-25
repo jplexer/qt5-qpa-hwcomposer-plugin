@@ -63,12 +63,19 @@
 #include <QtPlatformSupport/private/qeglplatformcontext_p.h>
 #endif
 
+#include <QtCore/QAtomicInt>
+#include <QtCore/QHash>
+#include <QtCore/QList>
+#include <QtCore/QByteArray>
+
 QT_BEGIN_NAMESPACE
 
 class QEglFSContext;
 class QEglFSWindow;
+class QEglFSScreen;
 class HwComposerScreenInfo;
 class HwComposerBackend;
+class QTimer;
 
 class HwComposerContext
 {
@@ -81,12 +88,28 @@ public:
     int screenDepth() const;
 
     // Clockwise rotation (0, 90, 180, 270) applied to the rendered UI before
-    // it reaches the panel, from QPA_HWC_ROTATION. For panels mounted rotated
-    // relative to the device (e.g. the Pixel 9 Pro Fold inner display).
+    // it reaches the panel of the display currently rendered to, from
+    // QPA_HWC_ROTATION (or QPA_HWC_DISPLAY_SWITCH). For panels mounted
+    // rotated relative to the device (e.g. the Pixel 9 Pro Fold inner display).
     int displayRotation() const;
-    // Screen size/physical size as seen by Qt, i.e. after rotation.
+    // Screen size/physical size as seen by Qt, i.e. of the requested display
+    // after rotation.
     QSize logicalScreenSize() const;
     QSizeF logicalPhysicalScreenSize() const;
+
+    // Runtime switching between built-in displays, e.g. on foldables:
+    //   QPA_HWC_DISPLAY_SWITCH_FILE=/sys/devices/platform/hall_sensor/state
+    //   QPA_HWC_DISPLAY_SWITCH=1=0@90,0=1@0   (file value=display@rotation)
+    //   QPA_HWC_DISPLAY_SWITCH_INTERVAL=250   (poll interval in ms)
+    // Qt keeps one window; the plugin keeps a native window/EGL surface per
+    // display and renders through an FBO, so a switch only changes the
+    // screen geometry Qt sees and the surface the frame is blitted to.
+    bool displaySwitching() const { return m_switchEnabled; }
+    quint64 activeDisplay() const { return quint64(m_activeDisplay.load()); }
+    // Called on the render thread at the start of a frame.
+    void applyPendingDisplaySwitch();
+    EGLNativeWindowType createNativeWindowFor(quint64 display);
+    void setScreen(QEglFSScreen *screen) { m_screen = screen; }
 
     QSurfaceFormat surfaceFormatFor(const QSurfaceFormat &inputFormat) const;
 
@@ -102,11 +125,36 @@ public:
     bool requestUpdate(QEglFSWindow *window);
 
 private:
+    struct SwitchTarget {
+        QByteArray value;
+        quint64 display;
+        int rotation;
+    };
+    struct DisplayInfo {
+        QSize size;
+        QSizeF physicalSize;
+    };
+
+    void setupDisplaySwitching();
+    void pollDisplaySwitch();
+    int rotationFor(quint64 display) const;
+    DisplayInfo infoFor(quint64 display) const;
+
     HwComposerScreenInfo *info;
     HwComposerBackend *backend;
     bool display_off;
     bool window_created;
     qreal fps;
+
+    bool m_switchEnabled;
+    QByteArray m_switchFile;
+    QList<SwitchTarget> m_switchTargets;
+    QHash<quint64, DisplayInfo> m_displayInfo;
+    QAtomicInt m_requestedDisplay;
+    QAtomicInt m_activeDisplay;
+    int m_defaultRotation;
+    QTimer *m_switchTimer;
+    QEglFSScreen *m_screen;
 };
 
 QT_END_NAMESPACE

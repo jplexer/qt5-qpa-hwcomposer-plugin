@@ -59,6 +59,7 @@ QEglFSWindow::QEglFSWindow(HwComposerContext *hwc, QWindow *w)
     , m_surface(0)
     , m_window(0)
     , m_hwc(hwc)
+    , m_initialDisplay(0)
 {
 #ifdef QEGL_EXTRA_DEBUG
     qWarning("QEglWindow %p: %p 0x%x\n", this, w, uint(m_window));
@@ -102,10 +103,41 @@ void QEglFSWindow::invalidateSurface()
     }
 }
 
+EGLSurface QEglFSWindow::surface() const
+{
+    if (!m_hwc->displaySwitching() || !m_surface)
+        return m_surface;
+
+    const quint64 active = m_hwc->activeDisplay();
+    if (active == m_initialDisplay)
+        return m_surface;
+
+    QMutexLocker lock(&m_displaySurfacesLock);
+    auto it = m_displaySurfaces.constFind(active);
+    if (it != m_displaySurfaces.constEnd())
+        return it->surface;
+
+    DisplaySurface ds;
+    ds.window = m_hwc->createNativeWindowFor(active);
+    ds.surface = EGL_NO_SURFACE;
+    if (ds.window) {
+        EGLDisplay display = static_cast<QEglFSScreen *>(screen())->display();
+        ds.surface = eglCreateWindowSurface(display, m_config, ds.window, NULL);
+        if (ds.surface == EGL_NO_SURFACE)
+            qWarning("Display switching: could not create the EGL surface for display %llu: 0x%x",
+                     active, eglGetError());
+    }
+    if (ds.surface == EGL_NO_SURFACE)
+        return m_surface;
+    m_displaySurfaces.insert(active, ds);
+    return ds.surface;
+}
+
 void QEglFSWindow::resetSurface()
 {
     EGLDisplay display = static_cast<QEglFSScreen *>(screen())->display();
 
+    m_initialDisplay = m_hwc->activeDisplay();
     m_window = m_hwc->createNativeWindow(m_format);
     m_surface = eglCreateWindowSurface(display, m_config, m_window, NULL);
     if (m_surface == EGL_NO_SURFACE) {
@@ -117,6 +149,18 @@ void QEglFSWindow::resetSurface()
 
 void QEglFSWindow::destroy()
 {
+    {
+        QMutexLocker lock(&m_displaySurfacesLock);
+        if (!m_displaySurfaces.isEmpty()) {
+            EGLDisplay display = static_cast<QEglFSScreen *>(screen())->display();
+            for (const DisplaySurface &ds : m_displaySurfaces) {
+                eglDestroySurface(display, ds.surface);
+                m_hwc->destroyNativeWindow(ds.window);
+            }
+            m_displaySurfaces.clear();
+        }
+    }
+
     if (m_surface) {
         EGLDisplay display = static_cast<QEglFSScreen *>(screen())->display();
         eglDestroySurface(display, m_surface);
