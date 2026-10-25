@@ -124,6 +124,9 @@ public:
     // Powers the current display off and the given one on (unless the
     // display is asleep); it then becomes the target of sleep/vsync calls.
     virtual bool switchDisplay(uint64_t /*display*/) { return false; }
+    // Powers a display that isn't rendered to off (e.g. the other panel of a
+    // foldable, which may still show the bootloader's splash).
+    virtual void powerOffDisplay(uint64_t /*display*/) { }
 
 protected:
     HwComposerBackend(hw_module_t *hwc_module, void *libmsf);

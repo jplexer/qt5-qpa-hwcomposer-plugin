@@ -502,6 +502,16 @@ bool HwComposerBackend_v20::switchDisplay(uint64_t display)
     return true;
 }
 
+void HwComposerBackend_v20::powerOffDisplay(uint64_t display)
+{
+    QMutexLocker lock(&m_displayLock);
+    hwc2_compat_display_t *hwcDisplay = displayFor(display);
+    if (!hwcDisplay || hwcDisplay == hwc2_primary_display)
+        return;
+    hwc2_compat_display_set_vsync_enabled(hwcDisplay, HWC2_VSYNC_DISABLE);
+    hwc2_compat_display_set_power_mode(hwcDisplay, HWC2_POWER_MODE_OFF);
+}
+
 void HwComposerBackend_v20::timerEvent(QTimerEvent *e)
 {
     if (e->timerId() == m_vsyncTimeout.timerId()) {

@@ -77,6 +77,7 @@ public:
                                    float *physical_width, float *physical_height) Q_DECL_OVERRIDE;
     virtual EGLNativeWindowType createWindowFor(uint64_t display, int width, int height) Q_DECL_OVERRIDE;
     virtual bool switchDisplay(uint64_t display) Q_DECL_OVERRIDE;
+    virtual void powerOffDisplay(uint64_t display) Q_DECL_OVERRIDE;
 
     void timerEvent(QTimerEvent *) Q_DECL_OVERRIDE;
     void handleVSyncEvent();

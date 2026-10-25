@@ -117,6 +117,13 @@ HwComposerContext::HwComposerContext()
     }
 
     if (m_switchEnabled) {
+        // Only the active display is powered on; the others may still be on
+        // from the bootloader (splash, touch active).
+        for (const SwitchTarget &t : m_switchTargets) {
+            if (t.display != activeDisplay())
+                backend->powerOffDisplay(t.display);
+        }
+
         m_switchTimer = new QTimer;
         m_switchTimer->setInterval(qBound(50, qEnvironmentVariableIntValue("QPA_HWC_DISPLAY_SWITCH_INTERVAL", &ok), 5000));
         if (!ok)
