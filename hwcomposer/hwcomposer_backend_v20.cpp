@@ -73,6 +73,7 @@ struct HwcProcs_v20 : public HWC2EventListener
 {
     HwComposerBackend_v20 *backend;
     hwc2_display_t primaryDisplayId;
+    bool primaryDisplayForced;
 };
 
 void hwc2_callback_vsync(HWC2EventListener* listener, int32_t /*sequenceId*/,
@@ -98,7 +99,7 @@ void hwc2_callback_hotplug(HWC2EventListener* listener, int32_t sequenceId,
            connected ? "connected" : "disconnected",
            primaryDisplay ? "primary" : "external");
 
-    if (primaryDisplay) {
+    if (primaryDisplay && !static_cast<HwcProcs_v20 *>(listener)->primaryDisplayForced) {
         static_cast<HwcProcs_v20 *>(listener)->primaryDisplayId = display;
     }
 
@@ -271,6 +272,18 @@ HwComposerBackend_v20::HwComposerBackend_v20(hw_module_t *hwc_module, void *libm
     // hwc2_compat_device_get_display_by_id loop will request the
     // correct primary diplay once primaryDisplayId has been set.
     procs->primaryDisplayId = 0;
+    procs->primaryDisplayForced = false;
+
+    // Devices with several built-in panels (e.g. foldables) may report more
+    // than one display as primary; the last hotplug would win. Allow the
+    // adaptation to pin the display instead.
+    bool forcedOk = false;
+    int forcedId = qEnvironmentVariableIntValue("QPA_HWC_DISPLAY_ID", &forcedOk);
+    if (forcedOk && forcedId >= 0) {
+        procs->primaryDisplayId = forcedId;
+        procs->primaryDisplayForced = true;
+        qDebug("Using display %d from QPA_HWC_DISPLAY_ID", forcedId);
+    }
 
     hwc2_device = hwc2_compat_device_new(false);
     HWC_PLUGIN_ASSERT_NOT_NULL(hwc2_device);
