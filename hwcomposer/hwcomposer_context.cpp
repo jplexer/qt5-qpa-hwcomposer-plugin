@@ -56,6 +56,7 @@
 #include <qcoreapplication.h>
 #include <QtCore/QFile>
 #include <QtCore/QTimer>
+#include <QtCore/QMetaObject>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
@@ -121,7 +122,10 @@ HwComposerContext::HwComposerContext()
         if (!ok)
             m_switchTimer->setInterval(250);
         QObject::connect(m_switchTimer, &QTimer::timeout, [this]() { pollDisplaySwitch(); });
-        m_switchTimer->start();
+        // The platform plugin is created before the GUI thread has an event
+        // dispatcher, so the timer can't be started yet; start it from the
+        // event loop instead.
+        QMetaObject::invokeMethod(m_switchTimer, "start", Qt::QueuedConnection);
     }
 
     if (rotationFor(activeDisplay()))
