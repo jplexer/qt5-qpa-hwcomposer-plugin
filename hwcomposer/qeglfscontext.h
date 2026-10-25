@@ -69,13 +69,30 @@ public:
 #else
             );
 #endif
+    ~QEglFSContext();
     bool makeCurrent(QPlatformSurface *surface);
     EGLSurface eglSurfaceForPlatformSurface(QPlatformSurface *surface);
     void swapBuffers(QPlatformSurface *surface);
+    GLuint defaultFramebufferObject(QPlatformSurface *surface) const;
 private:
+    bool rotating(QPlatformSurface *surface) const;
+    bool ensureRotationTarget();
+    void blitRotated();
+
     HwComposerContext *m_hwc;
     EGLConfig m_config;
     bool m_swapIntervalConfigured;
+
+    // QPA_HWC_ROTATION: the scene is rendered into this FBO (logical size)
+    // and drawn rotated onto the window surface (native size) on swap.
+    GLuint m_rotFbo;
+    GLuint m_rotTexture;
+    GLuint m_rotDepthStencil;
+    GLuint m_rotProgram;
+    GLuint m_rotVbo;
+    typedef void (*RawBindFramebuffer)(GLenum target, GLuint framebuffer);
+    RawBindFramebuffer m_rawBindFramebuffer;
+    bool m_rotFailed;
 };
 
 QT_END_NAMESPACE

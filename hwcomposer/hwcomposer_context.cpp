@@ -99,6 +99,35 @@ QSize HwComposerContext::screenSize() const
     return info->screenSize();
 }
 
+int HwComposerContext::displayRotation() const
+{
+    static const int rotation = []() {
+        bool ok = false;
+        int r = qEnvironmentVariableIntValue("QPA_HWC_ROTATION", &ok);
+        if (!ok || (r != 0 && r != 90 && r != 180 && r != 270)) {
+            if (ok)
+                qWarning("Ignoring invalid QPA_HWC_ROTATION=%d (use 0, 90, 180 or 270)", r);
+            return 0;
+        }
+        if (r)
+            qDebug("Rotating output by %d degrees (QPA_HWC_ROTATION)", r);
+        return r;
+    }();
+    return rotation;
+}
+
+QSize HwComposerContext::logicalScreenSize() const
+{
+    QSize size = screenSize();
+    return (displayRotation() % 180) ? size.transposed() : size;
+}
+
+QSizeF HwComposerContext::logicalPhysicalScreenSize() const
+{
+    QSizeF size = physicalScreenSize();
+    return (displayRotation() % 180) ? size.transposed() : size;
+}
+
 QSurfaceFormat HwComposerContext::surfaceFormatFor(const QSurfaceFormat &inputFormat) const
 {
     QSurfaceFormat newFormat = inputFormat; 

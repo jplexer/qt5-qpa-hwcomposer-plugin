@@ -78,7 +78,7 @@ void QEglFSWindow::create()
     setWindowState(Qt::WindowFullScreen);
 
     if (window()->type() == Qt::Desktop) {
-        QRect rect(QPoint(), m_hwc->screenSize());
+        QRect rect(QPoint(), m_hwc->logicalScreenSize());
         QPlatformWindow::setGeometry(rect);
         QWindowSystemInterface::handleGeometryChange(window(), rect);
         return;

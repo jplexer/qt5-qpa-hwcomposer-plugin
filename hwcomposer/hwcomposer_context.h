@@ -80,6 +80,14 @@ public:
     QSize screenSize() const;
     int screenDepth() const;
 
+    // Clockwise rotation (0, 90, 180, 270) applied to the rendered UI before
+    // it reaches the panel, from QPA_HWC_ROTATION. For panels mounted rotated
+    // relative to the device (e.g. the Pixel 9 Pro Fold inner display).
+    int displayRotation() const;
+    // Screen size/physical size as seen by Qt, i.e. after rotation.
+    QSize logicalScreenSize() const;
+    QSizeF logicalPhysicalScreenSize() const;
+
     QSurfaceFormat surfaceFormatFor(const QSurfaceFormat &inputFormat) const;
 
     EGLNativeDisplayType platformDisplay() const;

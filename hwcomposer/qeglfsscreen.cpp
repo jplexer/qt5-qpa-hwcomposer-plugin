@@ -91,7 +91,7 @@ void QEglFSScreen::onStarted()
 
 QRect QEglFSScreen::geometry() const
 {
-    return QRect(QPoint(0, 0), m_hwc->screenSize());
+    return QRect(QPoint(0, 0), m_hwc->logicalScreenSize());
 }
 
 int QEglFSScreen::depth() const
@@ -111,13 +111,13 @@ QImage::Format QEglFSScreen::format() const
 
 QSizeF QEglFSScreen::physicalSize() const
 {
-    return m_hwc->physicalScreenSize();
+    return m_hwc->logicalPhysicalScreenSize();
 }
 
 QDpi QEglFSScreen::logicalDpi() const
 {
-    QSizeF ps = m_hwc->physicalScreenSize();
-    QSize s = m_hwc->screenSize();
+    QSizeF ps = m_hwc->logicalPhysicalScreenSize();
+    QSize s = m_hwc->logicalScreenSize();
 
     return QDpi(Q_MM_PER_INCH * s.width() / ps.width(),
                 Q_MM_PER_INCH * s.height() / ps.height());
@@ -132,7 +132,7 @@ qreal QEglFSScreen::refreshRate() const
 #ifdef WITH_SENSORS
 void QEglFSScreen::orientationReadingChanged()
 {
-    QSize screenSize = m_hwc->screenSize();
+    QSize screenSize = m_hwc->logicalScreenSize();
     Qt::ScreenOrientation screenPrimaryOrientation = Qt::PortraitOrientation;
     if (screenSize.width() > screenSize.height()) {
         screenPrimaryOrientation = Qt::LandscapeOrientation;
